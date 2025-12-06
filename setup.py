@@ -25,4 +25,10 @@ setup(
         "gputil",
         "jaxopt",
     ],
+    # For CUDA-enabled JAX, install with:
+    # pip install "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    # Or install this package with: pip install -e ".[cuda]"
+    extras_require={
+        "cuda": ["jax[cuda12]"],
+    },
 )
