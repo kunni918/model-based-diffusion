@@ -73,16 +73,24 @@ def run_path_integral(args: Args):
         "humanoidrun": 0.1,
         "walker2d": 0.1,
         "pushT": 0.2,
+        "heavytruck": 0.1,
+        "heavy_truck": 0.1,
     }
     Nrefine_recommend = {
         "pushT": 200,
         "humanoidrun": 300,
+        "heavytruck": 150,
+        "heavy_truck": 150,
     }
     Nsample_recommend = {
         "humanoidrun": 8192,
+        "heavytruck": 1024,
+        "heavy_truck": 1024,
     }
     Hsample_recommend = {
         "pushT": 40,
+        "heavytruck": 300,
+        "heavy_truck": 300,
     }
     if not args.disable_recommended_params:
         args.temp_sample = temp_recommend.get(args.env_name, args.temp_sample)
@@ -97,9 +105,11 @@ def run_path_integral(args: Args):
     step_env_jit = jax.jit(env.step)
     reset_env_jit = jax.jit(env.reset)
     eval_us = jax.jit(functools.partial(mbd.utils.eval_us, step_env_jit))
-    render_us = functools.partial(
-        mbd.utils.render_us, step_env_jit, env.sys.replace(dt=env.dt)
-    )
+    render_us = None
+    if hasattr(env, "sys"):
+        render_us = functools.partial(
+            mbd.utils.render_us, step_env_jit, env.sys.replace(dt=env.dt)
+        )
 
     rng, rng_reset = jax.random.split(rng)  # NOTE: rng_reset should never be changed.
     state_init = reset_env_jit(rng_reset)

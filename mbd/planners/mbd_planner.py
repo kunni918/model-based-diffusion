@@ -64,22 +64,31 @@ def run_diffusion(args: Args):
         "humanoidrun": 0.1,
         "walker2d": 0.1,
         "pushT": 0.2,
+        "heavytruck": 0.2,
     }
     Ndiffuse_recommend = {
         "pushT": 200,
         "humanoidrun": 300,
+        "heavytruck": 1000,
     }
     Nsample_recommend = {
         "humanoidrun": 8192,
+        "heavytruck": 8192,
     }
     Hsample_recommend = {
         "pushT": 40,
+        "heavytruck": 300,
+    }
+    beta_recommend = {
+        "heavytruck": (5e-4, 1e-2),
     }
     if not args.disable_recommended_params:
         args.temp_sample = temp_recommend.get(args.env_name, args.temp_sample)
         args.Ndiffuse = Ndiffuse_recommend.get(args.env_name, args.Ndiffuse)
         args.Nsample = Nsample_recommend.get(args.env_name, args.Nsample)
         args.Hsample = Hsample_recommend.get(args.env_name, args.Hsample)
+        beta_override = beta_recommend.get(args.env_name, (args.beta0, args.betaT))
+        args.beta0, args.betaT = beta_override
         print(f"override temp_sample to {args.temp_sample}")
     env = mbd.envs.get_env(args.env_name)
     Nx = env.observation_size
@@ -111,8 +120,14 @@ def run_diffusion(args: Args):
     sigmas_cond = sigmas_cond.at[0].set(0.0)
     print(f"init sigma = {sigmas[-1]:.2e}")
 
-    # 2) Start at pure noise (zero-mean actions); reverse diffusion denoises this.
-    YN = jnp.zeros([args.Hsample, Nu])
+    # 2) Start at a prior action trajectory; fall back to zeros if none provided.
+    if hasattr(env, "warm_start_actions"):
+        try:
+            YN = env.warm_start_actions(args.Hsample)
+        except Exception:
+            YN = jnp.zeros([args.Hsample, Nu])
+    else:
+        YN = jnp.zeros([args.Hsample, Nu])
 
     @jax.jit
     def reverse_once(carry, unused):
@@ -181,35 +196,56 @@ def run_diffusion(args: Args):
         return jnp.array(Ybars)
 
     rng_exp, rng = jax.random.split(rng)
-    Yi = reverse(YN, rng_exp)
+    Ybars = reverse(YN, rng_exp)
     if not args.not_render:
         path = f"{mbd.__path__[0]}/../results/{args.env_name}"
         if not os.path.exists(path):
             os.makedirs(path)
-        jnp.save(f"{path}/mu_0ts.npy", Yi)
+        jnp.save(f"{path}/mu_0ts.npy", Ybars)
         if args.env_name == "car2d":
             fig, ax = plt.subplots(1, 1, figsize=(3, 3))
             # rollout
             xs = jnp.array([state_init.pipeline_state])
             state = state_init
-            for t in range(Yi.shape[1]):
-                state = step_env_jit(state, Yi[-1, t])
+            for t in range(Ybars.shape[1]):
+                state = step_env_jit(state, Ybars[-1, t])
                 xs = jnp.concatenate([xs, state.pipeline_state[None]], axis=0)
             env.render(ax, xs)
             if args.enable_demo:
                 ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", label="RRT path")
             ax.legend()
             plt.savefig(f"{path}/rollout.png")
+        elif args.env_name in ["heavytruck", "heavy_truck"]:
+            fig, axes = plt.subplots(4, 1, figsize=(9, 10), sharex=True)
+            rewss_final, qs_final = rollout_us(state_init, Ybars[-1])
+            xs = jnp.concatenate([state_init.pipeline_state[None], qs_final], axis=0)
+            env.render(axes, xs, Ybars[-1], warm_start=YN)
+            plt.tight_layout()
+            plt.savefig(f"{path}/rollout.png")
+            plt.close(fig)
+
+            # Intermediate diffusion snapshots to visualize optimization progress.
+            snapshot_ids = jnp.linspace(
+                0, Ybars.shape[0] - 1, num=jnp.minimum(4, Ybars.shape[0])
+            ).astype(int)
+            for idx in snapshot_ids.tolist():
+                fig, axes = plt.subplots(4, 1, figsize=(9, 10), sharex=True)
+                _, qs_stage = rollout_us(state_init, Ybars[idx])
+                xs = jnp.concatenate([state_init.pipeline_state[None], qs_stage], axis=0)
+                env.render(axes, xs, Ybars[idx], warm_start=YN)
+                plt.tight_layout()
+                plt.savefig(f"{path}/rollout_stage_{idx}.png")
+                plt.close(fig)
         else:
             render_us = functools.partial(
                 mbd.utils.render_us,
                 step_env_jit,
                 env.sys.tree_replace({"opt.timestep": env.dt}),
             )
-            webpage = render_us(state_init, Yi[-1])
+            webpage = render_us(state_init, Ybars[-1])
             with open(f"{path}/rollout.html", "w") as f:
                 f.write(webpage)
-    rewss_final, _ = rollout_us(state_init, Yi[-1])
+    rewss_final, qs_final = rollout_us(state_init, Ybars[-1])
     rew_final = rewss_final.mean()
 
     return rew_final

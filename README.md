@@ -39,7 +39,8 @@ cd mbd/planners
 python mbd_planner.py --env_name $ENV_NAME
 ```
 
-where `$ENV_NAME` is the name of the environment, you can choose from `hopper`, `halfcheetah`, `walker2d`, `ant`, `humanoidrun`, `humanoidstandup`, `humanoidtrack`, `car2d`, `pushT`.
+where `$ENV_NAME` is the name of the environment, you can choose from `hopper`, `halfcheetah`, `walker2d`, `ant`, `humanoidrun`, `humanoidstandup`, `humanoidtrack`, `car2d`, `pushT`, `heavytruck`.
+The `heavytruck` environment models fuel-optimal eco-driving over a 5 km pitched highway segment; objective is fuel-only with hard/soft constraints: finish within a ~70 km/h time window and respect speed limits while using throttle/coast/brake.
 
 To run model-based diffusion combined with demonstrations, run the following command:
 
